@@ -62,14 +62,19 @@ process = psutil.Process(pid)
 def sample():
     while not stop_flag:
         t = time.time() - start_time
-        # CPU / RAM
+        # CPU / RAM - 逐个进程采样，忽略已退出的子进程
+        cpu = 0
+        mem = 0
         try:
-            children = process.children(recursive=True)
-            procs = [process] + children
-            cpu = sum(p.cpu_percent(interval=None) for p in procs)
-            mem = sum(p.memory_info().rss for p in procs) / 1024 / 1024  # MB
+            procs = [process] + process.children(recursive=True)
+            for p in procs:
+                try:
+                    cpu += p.cpu_percent(interval=None)
+                    mem += p.memory_info().rss / 1024 / 1024  # MB
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass  # 子进程已退出或无权限，跳过
         except psutil.NoSuchProcess:
-            break
+            pass  # 主进程已退出，本轮CPU/内存为0
 
         # GPU
         power = nvmlDeviceGetPowerUsage(gpu_handle) / 1000
@@ -95,6 +100,8 @@ thread.start()
 try:
     proc.wait()
 except KeyboardInterrupt:
+    pass
+finally:
     stop_flag = True
 
 thread.join()
@@ -160,3 +167,4 @@ plt.savefig("monitor_usage.png", dpi=200)
 plt.close()
 
 print("Saved: monitor_usage.png, monitor_stats.csv")
+
